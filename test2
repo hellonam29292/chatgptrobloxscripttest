@@ -1,0 +1,281 @@
+--// Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+--// Default Settings (customizable via GUI)
+local settings = {
+    fovRadius = 200,         -- circle FOV in pixels
+    aimKey = Enum.KeyCode.E, -- trigger key for aimlock
+    hitboxExpander = 0,      -- extra radius added to head hitbox (max 100)
+    highlightPlayers = false -- toggle for highlighting players
+}
+
+--// Create FOV Circle using Drawing API
+local fovCircle = Drawing.new("Circle")
+fovCircle.Radius = settings.fovRadius
+fovCircle.Filled = false
+fovCircle.Transparency = 0.7
+fovCircle.Color = Color3.new(1, 1, 1)
+fovCircle.Visible = true
+
+--// Table to store highlight drawings for players
+local highlights = {}
+
+--// Helper: Convert world position to screen position (returns vector2 or nil)
+local function worldToScreen(pos)
+    local screenPoint, onScreen = Camera:WorldToViewportPoint(pos)
+    if onScreen then 
+        return Vector2.new(screenPoint.X, screenPoint.Y)
+    end
+    return nil
+end
+
+--// Function to get nearest target head within circle FOV (plus extra hitbox expansion).
+local function getNearestTarget()
+    local nearestDistance = math.huge
+    local bestTarget = nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+            local head = player.Character.Head
+            local screenPos = worldToScreen(head.Position)
+            if screenPos then
+                local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                local dist = (screenPos - center).Magnitude
+                if dist <= (settings.fovRadius + settings.hitboxExpander) and dist < nearestDistance then
+                    nearestDistance = dist
+                    bestTarget = head
+                end
+            end
+        end
+    end
+    return bestTarget
+end
+
+--// GUI Creation
+local function createUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "AimLockUI"
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 250, 0, 180)
+    mainFrame.Position = UDim2.new(0, 10, 0, 10)
+    mainFrame.BackgroundTransparency = 0.5
+    mainFrame.BackgroundColor3 = Color3.new(0, 0, 0)
+    mainFrame.Parent = screenGui
+
+    local padding = 5
+    local yPos = padding
+
+    -- Title Label
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, -padding*2, 0, 25)
+    title.Position = UDim2.new(0, padding, 0, yPos)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.SourceSansBold
+    title.TextSize = 20
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Text = "AimLock Settings"
+    title.Parent = mainFrame
+
+    yPos = yPos + 30
+
+    -- Aim Key Label and TextBox
+    local aimKeyLabel = Instance.new("TextLabel")
+    aimKeyLabel.Name = "AimKeyLabel"
+    aimKeyLabel.Size = UDim2.new(0.5, -padding, 0, 20)
+    aimKeyLabel.Position = UDim2.new(0, padding, 0, yPos)
+    aimKeyLabel.BackgroundTransparency = 1
+    aimKeyLabel.TextColor3 = Color3.new(1,1,1)
+    aimKeyLabel.Text = "Aim Key:"
+    aimKeyLabel.Font = Enum.Font.SourceSans
+    aimKeyLabel.TextSize = 16
+    aimKeyLabel.Parent = mainFrame
+
+    local aimKeyBox = Instance.new("TextBox")
+    aimKeyBox.Name = "AimKeyBox"
+    aimKeyBox.Size = UDim2.new(0.5, -padding, 0, 20)
+    aimKeyBox.Position = UDim2.new(0.5, padding, 0, yPos)
+    aimKeyBox.BackgroundColor3 = Color3.new(1,1,1)
+    aimKeyBox.TextColor3 = Color3.new(0,0,0)
+    aimKeyBox.Text = settings.aimKey.Name
+    aimKeyBox.ClearTextOnFocus = false
+    aimKeyBox.Font = Enum.Font.SourceSans
+    aimKeyBox.TextSize = 16
+    aimKeyBox.Parent = mainFrame
+
+    yPos = yPos + 25
+
+    aimKeyBox.FocusLost:Connect(function()
+        local keyStr = aimKeyBox.Text:upper()
+        local ok, key = pcall(function() return Enum.KeyCode[key] end)
+        if ok and key then
+            settings.aimKey = key
+        else
+            aimKeyBox.Text = settings.aimKey.Name -- revert if invalid
+        end
+    end)
+
+    -- FOV Radius Label and TextBox
+    local fovLabel = Instance.new("TextLabel")
+    fovLabel.Name = "FOVLabel"
+    fovLabel.Size = UDim2.new(0.5, -padding, 0, 20)
+    fovLabel.Position = UDim2.new(0, padding, 0, yPos)
+    fovLabel.BackgroundTransparency = 1
+    fovLabel.TextColor3 = Color3.new(1,1,1)
+    fovLabel.Text = "FOV Radius:"
+    fovLabel.Font = Enum.Font.SourceSans
+    fovLabel.TextSize = 16
+    fovLabel.Parent = mainFrame
+
+    local fovBox = Instance.new("TextBox")
+    fovBox.Name = "FOVBox"
+    fovBox.Size = UDim2.new(0.5, -padding, 0, 20)
+    fovBox.Position = UDim2.new(0.5, padding, 0, yPos)
+    fovBox.BackgroundColor3 = Color3.new(1,1,1)
+    fovBox.TextColor3 = Color3.new(0,0,0)
+    fovBox.Text = tostring(settings.fovRadius)
+    fovBox.ClearTextOnFocus = false
+    fovBox.Font = Enum.Font.SourceSans
+    fovBox.TextSize = 16
+    fovBox.Parent = mainFrame
+
+    yPos = yPos + 25
+
+    fovBox.FocusLost:Connect(function()
+        local newVal = tonumber(fovBox.Text)
+        if newVal then
+            settings.fovRadius = newVal
+            fovCircle.Radius = settings.fovRadius
+        else
+            fovBox.Text = tostring(settings.fovRadius)
+        end
+    end)
+
+    -- Hitbox Expander Label and TextBox
+    local hitboxLabel = Instance.new("TextLabel")
+    hitboxLabel.Name = "HitboxLabel"
+    hitboxLabel.Size = UDim2.new(0.5, -padding, 0, 20)
+    hitboxLabel.Position = UDim2.new(0, padding, 0, yPos)
+    hitboxLabel.BackgroundTransparency = 1
+    hitboxLabel.TextColor3 = Color3.new(1,1,1)
+    hitboxLabel.Text = "Hitbox Expander:"
+    hitboxLabel.Font = Enum.Font.SourceSans
+    hitboxLabel.TextSize = 16
+    hitboxLabel.Parent = mainFrame
+
+    local hitboxBox = Instance.new("TextBox")
+    hitboxBox.Name = "HitboxBox"
+    hitboxBox.Size = UDim2.new(0.5, -padding, 0, 20)
+    hitboxBox.Position = UDim2.new(0.5, padding, 0, yPos)
+    hitboxBox.BackgroundColor3 = Color3.new(1,1,1)
+    hitboxBox.TextColor3 = Color3.new(0,0,0)
+    hitboxBox.Text = tostring(settings.hitboxExpander)
+    hitboxBox.ClearTextOnFocus = false
+    hitboxBox.Font = Enum.Font.SourceSans
+    hitboxBox.TextSize = 16
+    hitboxBox.Parent = mainFrame
+
+    yPos = yPos + 25
+
+    hitboxBox.FocusLost:Connect(function()
+        local newVal = tonumber(hitboxBox.Text)
+        if newVal and newVal >= 0 and newVal <= 100 then
+            settings.hitboxExpander = newVal
+        else
+            hitboxBox.Text = tostring(settings.hitboxExpander)
+        end
+    end)
+
+    -- Highlight Toggle Button
+    local highlightButton = Instance.new("TextButton")
+    highlightButton.Name = "HighlightButton"
+    highlightButton.Size = UDim2.new(1, -padding*2, 0, 30)
+    highlightButton.Position = UDim2.new(0, padding, 0, yPos)
+    highlightButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+    highlightButton.TextColor3 = Color3.new(1,1,1)
+    highlightButton.Font = Enum.Font.SourceSansBold
+    highlightButton.TextSize = 18
+    highlightButton.Text = "Highlight All Players: OFF"
+    highlightButton.Parent = mainFrame
+
+    highlightButton.MouseButton1Click:Connect(function()
+        settings.highlightPlayers = not settings.highlightPlayers
+        if settings.highlightPlayers then
+            highlightButton.Text = "Highlight All Players: ON"
+        else
+            highlightButton.Text = "Highlight All Players: OFF"
+            -- Hide any existing highlights
+            for _, circle in pairs(highlights) do
+                circle.Visible = false
+            end
+        end
+    end)
+end
+
+createUI()
+
+--// Update loop: update FOV circle, highlights, and aim lock if trigger is held.
+RunService.Heartbeat:Connect(function(delta)
+    local viewportCenter = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    fovCircle.Position = viewportCenter
+
+    -- Update highlight drawings for players if highlight is enabled.
+    if settings.highlightPlayers then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+                local head = player.Character.Head
+                local screenPos = worldToScreen(head.Position)
+                if screenPos then
+                    if not highlights[player] then
+                        local circle = Drawing.new("Circle")
+                        circle.Filled = false
+                        circle.Thickness = 2
+                        circle.Transparency = 0.7
+                        circle.Radius = 15 + settings.hitboxExpander * 0.3 -- adjust based on hitbox expander
+                        -- Color blue for players on same team, red otherwise
+                        if player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then
+                            circle.Color = Color3.new(0, 0, 1)
+                        else
+                            circle.Color = Color3.new(1, 0, 0)
+                        end
+                        circle.Visible = true
+                        highlights[player] = circle
+                    end
+                    highlights[player].Position = screenPos
+                    highlights[player].Radius = 15 + settings.hitboxExpander * 0.3
+                    -- Update color dynamically
+                    if player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then
+                        highlights[player].Color = Color3.new(0, 0, 1)
+                    else
+                        highlights[player].Color = Color3.new(1, 0, 0)
+                    end
+                elseif highlights[player] then
+                    highlights[player].Visible = false
+                end
+            elseif highlights[player] then
+                highlights[player].Visible = false
+            end
+        end
+    else
+        for _, circle in pairs(highlights) do
+            circle.Visible = false
+        end
+    end
+
+    -- Aim lock: only execute if trigger key is held.
+    if UserInputService:IsKeyDown(settings.aimKey) then
+        local targetHead = getNearestTarget()
+        if targetHead then
+            local currentCamPos = Camera.CFrame.Position
+            local targetPos = targetHead.Position
+            local desiredCFrame = CFrame.new(currentCamPos, targetPos)
+            Camera.CFrame = Camera.CFrame:Lerp(desiredCFrame, 0.1)
+        end
+    end
+end)
